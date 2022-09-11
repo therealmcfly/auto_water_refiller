@@ -142,18 +142,19 @@ void runSetState () {
       lcd.setCursor(0,0);
       lcd.print("Select a mode");
       lcd.setCursor(0,1);
+      Serial.println(setSelect);
       lcd.print(setModeTxt[setSelect]);
       delay(300);
       lcd.setCursor(0,1);
       lcd.print("                ");
       delay(300);
 
-      if(setModeLoopCount <= 30) setModeLoopCount++;
-      else if(setModeLoopCount > 30) {
-        stateStatus = 0;
-        setModeLoopCount = 0;
-      }
-      if(stateStatus != 1) setModeLoopCount = 0;
+//      if(setModeLoopCount <= 30) setModeLoopCount++;
+//      else if(setModeLoopCount > 30) {
+//        stateStatus = 0;
+//        setModeLoopCount = 0;
+//      }
+//      if(stateStatus != 1) setModeLoopCount = 0;
     }
   }
   lcd.clear();
