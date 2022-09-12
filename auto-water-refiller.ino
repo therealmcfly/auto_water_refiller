@@ -40,6 +40,8 @@ int setModeLoopCount;
 int resModeRefillCount;
 int refillReq;
 
+bool interruptStandBy;
+
 // LCD display txt arrays
 char setModeTxt[3][17] = {
   "1. Auto Mode",
@@ -57,8 +59,6 @@ void setup () {
   pinMode(LBTN_PIN, INPUT);
   pinMode(RBTN_PIN, INPUT);
   pinMode(RLY_PIN, OUTPUT);
-  attachInterrupt(digitalPinToInterrupt(LBTN_PIN), leftBtn, FALLING);
-  attachInterrupt(digitalPinToInterrupt(RBTN_PIN), rightBtn, FALLING);
 
   lcd.init();
   lcd.backlight();
@@ -66,11 +66,15 @@ void setup () {
 
   rtc.halt(false);
   rtc.writeProtect(true); //switch to false to set rtc
-//  rtc.setTime(11,40,10);
+//  rtc.setTime(21,44,10);
 //  rtc.setDate(11,9,2022);
   
   digitalWrite(RLY_PIN, 1);
   lcd.begin(16,2);
+
+  
+  attachInterrupt(digitalPinToInterrupt(LBTN_PIN), leftBtn, RISING);
+  attachInterrupt(digitalPinToInterrupt(RBTN_PIN), rightBtn, RISING);
   
   stateStatus = STATESTATUS_DEFAULT;
   setSelect = SETSEL_DEFAULT;
@@ -81,6 +85,8 @@ void setup () {
 
   refillReq = 0;
 
+  interruptStandBy = 0;
+
   Serial.begin(9600);
   
   startDisplay();;
@@ -88,10 +94,14 @@ void setup () {
 }
 
 void loop() {
+  interruptStandBy = false;
+  Serial.print("stateStatus : ");
   Serial.print(stateStatus);
+  Serial.println();
+  Serial.print("modeStatus : ");
   Serial.print(modeStatus);
   Serial.println();
-  
+
   switch (stateStatus) {
     
     case 0 :
@@ -139,27 +149,32 @@ void runSetState () {
   
   while(stateStatus >0) {
     if (stateStatus == 1) {
+      if(interruptStandBy) interruptStandBy = false;
       lcd.setCursor(0,0);
       lcd.print("Select a mode");
       lcd.setCursor(0,1);
-      Serial.println(setSelect);
+      Serial.print("setSelect : ");
+      Serial.print(setSelect);
+      Serial.println();
       lcd.print(setModeTxt[setSelect]);
       delay(300);
       lcd.setCursor(0,1);
       lcd.print("                ");
       delay(300);
 
-//      if(setModeLoopCount <= 30) setModeLoopCount++;
-//      else if(setModeLoopCount > 30) {
-//        stateStatus = 0;
-//        setModeLoopCount = 0;
-//      }
-//      if(stateStatus != 1) setModeLoopCount = 0;
+      if(setModeLoopCount <= 30) setModeLoopCount++;
+      else if(setModeLoopCount > 30) {
+        stateStatus = 0;
+        setModeLoopCount = 0;
+      }
+      if(stateStatus != 1) setModeLoopCount = 0;
     }
   }
   lcd.clear();
   lcd.setCursor(0,0);
-  lcd.print("Saved!          ");
+  lcd.print("Entering        ");
+  lcd.setCursor(0,1);
+  lcd.print(setModeTxt[modeStatus]);
   delay(2000);
   lcd.clear();
 }
@@ -230,6 +245,7 @@ void tankIsFull() {
 }
 
 void fillWaterTank() {
+  
   lcd.clear();
   lcd.setCursor(0,0);
   lcd.print("Sensing");
@@ -244,10 +260,8 @@ void fillWaterTank() {
     delay(1000);
   }
   
-  if(analogRead(WS_PIN) < 300) 
+  if(analogRead(WS_PIN) < 300) //this loop statement loops until water tank is full
   {
-//    detachInterrupt(digitalPinToInterrupt(LBTN_PIN));
-//    detachInterrupt(digitalPinToInterrupt(RBTN_PIN));
     digitalWrite(RLY_PIN, 0);
     lcd.setCursor(0,0);
     lcd.print("Water level:    ");
@@ -275,13 +289,11 @@ void fillWaterTank() {
         lcd.print(".");
         dotCount= 0;
       }
-      
       delay(300);
     }
+    
     digitalWrite(RLY_PIN, 1);
     tankIsFull();
-//    attachInterrupt(digitalPinToInterrupt(LBTN_PIN), leftBtn, FALLING);
-//    attachInterrupt(digitalPinToInterrupt(RBTN_PIN), rightBtn, FALLING);
   } else {
     tankIsFull();
   }
@@ -296,27 +308,31 @@ void standBy() {
 
 //ISR functions 
 void leftBtn() {
-  switch(stateStatus) {
-    case 0 :
-      refillReq = 1;
-      break;
-    case 1 :
-        if (setSelect<2) setSelect++;
-      else setSelect = 0;
-      break;
-    default :
-      break;
+  if(!interruptStandBy) {
+    interruptStandBy =  0;
+    switch(stateStatus) {
+      case 0 :
+        refillReq = 1;
+        break;
+      case 1 :
+          if (setSelect<2) setSelect++;
+        else setSelect = 0;
+        break;
+      default :
+        break;
+    }
+  interruptStandBy = true;
   }
 }
-
 void rightBtn () {
-  switch(stateStatus) {
-    case 0 : 
-      stateStatus = 1;
-      setSelect = modeStatus;
-      break;
-    case 1 :
-      switch(setSelect) {
+  if(!interruptStandBy) {
+    switch(stateStatus) {
+      case 0 : 
+        stateStatus = 1;
+        setSelect = modeStatus;
+        break;
+      case 1 :
+        switch(setSelect) {
             case 0 :
                 modeStatus = 0;
                 stateStatus = 0;
@@ -331,8 +347,9 @@ void rightBtn () {
                 break;
             default :
               break;
-          }
+        }
       break;
-      break;
+    }
+  interruptStandBy = true;
   }
 }
