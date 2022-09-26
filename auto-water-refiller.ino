@@ -11,38 +11,54 @@ Time t;
 #define RBTN_PIN 3
 #define RLY_PIN 8
 
-//res mode time variable
-int reservedTime = 11;
 
-//function declaration
-void startDisplay(); //display phrase at startup
-void leftBtn(); // ISR function for left button
-void rightBtn(); // ISR function for right button
-void runSetState();
-void autoMode();
+// ISR function prototype
+void ISR_leftBtn(); // ISR function for left button
+void ISR_rightBtn(); // ISR function for right button
+
+
+//function 
 void runRunState();
+void runSetState();
+void runResSetState();
+
+void runrunAutoMode();
 void runResMode();
+void runManualMode();
+
+void startDisplay();//display phrase at startup
+void standBy();
 void tankIsFull();
 void fillWaterTank();
-void standBy();
 
 //Mode States
 
-const int STATESTATUS_DEFAULT = 1;
-const int SETSEL_DEFAULT = 0;
+const int STATE_DEFAULT = 0;
+const int MODE_DEFAULT = 2;
 
-volatile int stateStatus; // run state 0, set state 1
+volatile int stateStatus; // run state 0, set state 1, res time set state 2
 volatile int modeStatus; // autoMode 0, resMode 1, manualMode 2
 
-volatile int setSelect;
+volatile int modeSelect;
 
+//res mode time variables
+int reservedHour;
+int reservedMinute;
+
+volatile int resSetSelect;
+volatile int resHourSelect;
+volatile int resMinuteSelect;
+
+// other variables
 int setModeLoopCount;
 int resModeRefillCount;
 int refillReq;
 
+bool selectCount = 0;
+
 bool interruptStandBy;
 
-// LCD display txt arrays
+// LCD display text arrays
 char setModeTxt[3][17] = {
   "1. Auto Mode",
   "2. Res Mode ",
@@ -50,12 +66,8 @@ char setModeTxt[3][17] = {
   };
 
 
-
-
-
-
-
 void setup () {
+	
   pinMode(LBTN_PIN, INPUT);
   pinMode(RBTN_PIN, INPUT);
   pinMode(RLY_PIN, OUTPUT);
@@ -66,26 +78,32 @@ void setup () {
 
   rtc.halt(false);
   rtc.writeProtect(true); //switch to false to set rtc
-//  rtc.setTime(21,44,10);
-//  rtc.setDate(11,9,2022);
+  //rtc.setTime(22,14,10);
+  //rtc.setDate(18,9,2022);
   
   digitalWrite(RLY_PIN, 1);
   lcd.begin(16,2);
 
   
-  attachInterrupt(digitalPinToInterrupt(LBTN_PIN), leftBtn, RISING);
-  attachInterrupt(digitalPinToInterrupt(RBTN_PIN), rightBtn, RISING);
+  attachInterrupt(digitalPinToInterrupt(LBTN_PIN), ISR_leftBtn, FALLING);
+  attachInterrupt(digitalPinToInterrupt(RBTN_PIN), ISR_rightBtn, FALLING);
   
-  stateStatus = STATESTATUS_DEFAULT;
-  setSelect = SETSEL_DEFAULT;
+  stateStatus = STATE_DEFAULT;
+  modeStatus = MODE_DEFAULT;
+  modeSelect = modeStatus;
 
   resModeRefillCount = 0;
-  
   setModeLoopCount = 0;
-
   refillReq = 0;
 
-  interruptStandBy = 0;
+  interruptStandBy = false;
+
+  reservedHour = 8;
+  reservedMinute = 00;
+
+  resSetSelect = 0;
+  resHourSelect = reservedHour;
+  resMinuteSelect = reservedMinute;
 
   Serial.begin(9600);
   
@@ -94,36 +112,50 @@ void setup () {
 }
 
 void loop() {
-  interruptStandBy = false;
-  Serial.print("stateStatus : ");
-  Serial.print(stateStatus);
-  Serial.println();
-  Serial.print("modeStatus : ");
-  Serial.print(modeStatus);
-  Serial.println();
+	Serial.print("State Status : ");
+	Serial.print(stateStatus);
+	Serial.println();
+	Serial.print("Mode Status : ");
+	Serial.print(modeStatus);
+	Serial.println();
+	Serial.print("reservedHour");
+	Serial.print(reservedHour);
+	Serial.println();
+	Serial.print("reservedMinute");
+	Serial.print(reservedMinute);
+	Serial.println();
+	Serial.print("Res Set Select");
+	Serial.print(resSetSelect);
+	Serial.println();
 
-  switch (stateStatus) {
+	switch (stateStatus) {
     
-    case 0 :
-      runRunState();
-      break;
-    case 1 :
-      lcd.clear();
-      lcd.setCursor(0,0);
-      lcd.print("Entering");
-      lcd.setCursor(0,1);
-      lcd.print("Set Mode");
-      delay(300);
-      for(int i = 0;i<5; i++) {
-        lcd.setCursor((8+i),1);
-        lcd.print(".");
-        delay(300);
-      }
-      runSetState();
-      break;
+		case 0 :
+			runRunState();
+			break;
+		case 1 :
+			lcd.clear();
+			lcd.setCursor(0,0);
+			lcd.print("Entering");
+			lcd.setCursor(0,1);
+			lcd.print("Set State");
+			delay(300);
+			for(int i = 0;i<5; i++) {
+				lcd.setCursor((9+i),1);
+				lcd.print(".");
+				delay(300);
+			}
+		  
+			runSetState();
+			break;
+		
+		case 2:
+			runResSetState();
+			break;
       
-  }
-  delay(100);
+	}
+	if(interruptStandBy) interruptStandBy = false;
+	delay(100);
 }
 
 
@@ -140,43 +172,89 @@ void startDisplay () {
   lcd.setCursor(0,0);
   lcd.print("#Water Refiller#");
   lcd.setCursor(0,1);
-  lcd.print("ver. 2.02       ");
+  lcd.print("   Ver. 2.02    ");
   delay(3000);
 }
 
 void runSetState () {
   lcd.clear();
-  
-  while(stateStatus >0) {
-    if (stateStatus == 1) {
-      if(interruptStandBy) interruptStandBy = false;
-      lcd.setCursor(0,0);
-      lcd.print("Select a mode");
-      lcd.setCursor(0,1);
-      Serial.print("setSelect : ");
-      Serial.print(setSelect);
-      Serial.println();
-      lcd.print(setModeTxt[setSelect]);
-      delay(300);
-      lcd.setCursor(0,1);
-      lcd.print("                ");
-      delay(300);
+  while(stateStatus == 1) {
+    lcd.setCursor(0,0);
+    lcd.print("Select a mode");
+    lcd.setCursor(0,1);
+   
+    lcd.print(setModeTxt[modeSelect]);
+    delay(300);
+    lcd.setCursor(0,1);
+    lcd.print("                ");
+    delay(300);
 
-      if(setModeLoopCount <= 30) setModeLoopCount++;
-      else if(setModeLoopCount > 30) {
-        stateStatus = 0;
-        setModeLoopCount = 0;
-      }
-      if(stateStatus != 1) setModeLoopCount = 0;
-    }
+	if(setModeLoopCount <= 30) setModeLoopCount++;
+	else if(setModeLoopCount > 30) {
+		stateStatus = 0;
+		setModeLoopCount = 0;
+	}
+	if(stateStatus != 1) setModeLoopCount = 0;
+	if(interruptStandBy) interruptStandBy = false;
   }
-  lcd.clear();
-  lcd.setCursor(0,0);
-  lcd.print("Entering        ");
-  lcd.setCursor(0,1);
-  lcd.print(setModeTxt[modeStatus]);
-  delay(2000);
-  lcd.clear();
+  if(stateStatus == 0) {
+	  lcd.clear();
+	  lcd.setCursor(0,0);
+	  lcd.print("Entering        ");
+	  lcd.setCursor(0,1);
+	  lcd.print(setModeTxt[modeStatus]);
+	  delay(2000);
+	  lcd.clear();
+  }
+}
+
+void runResSetState() {
+	
+	selectCount = !selectCount;
+	
+	lcd.setCursor(0,0);
+	lcd.print("Set reserve time");
+	lcd.setCursor(7,1);
+	lcd.print(":");
+	if(selectCount) {
+		if(resHourSelect > 9) {
+			lcd.setCursor(5,1);
+			lcd.print(resHourSelect);
+		} else {
+			lcd.setCursor(5,1);
+			lcd.print("0");
+			lcd.setCursor(6,1);
+			lcd.print(resHourSelect);
+		}
+		if(resMinuteSelect > 9) {
+			lcd.setCursor(8,1);
+			lcd.print(resMinuteSelect);
+		} else {
+			lcd.setCursor(8,1);
+			lcd.print("0");
+			lcd.setCursor(9,1);
+			lcd.print(resMinuteSelect);
+		}
+	} else if (!selectCount) {
+		if (resSetSelect == 0) {
+				lcd.setCursor(5,1);
+				lcd.print("  ");
+		} else if (resSetSelect == 1) {
+				lcd.setCursor(8,1);
+				lcd.print("  ");
+		}
+	}
+	if (resSetSelect == 2) {
+		lcd.clear();
+		lcd.setCursor(0,0);
+		lcd.print("Entering        ");
+		lcd.setCursor(0,1);
+		lcd.print(setModeTxt[modeStatus]);
+		stateStatus = 0;
+		resSetSelect = 0;
+		delay(1800);
+	}
+	delay(200);
 }
 
 void runRunState() {
@@ -189,6 +267,9 @@ void runRunState() {
       fillWaterTank();
       break;
     case 1 :
+      t = rtc.getTime();
+      Serial.println(rtc.getTimeStr());
+      // Serial.println(rtc.getDateStr());
       switch (resModeRefillCount) {
         case 0:
           runResMode();
@@ -206,28 +287,21 @@ void runRunState() {
 }
 
 void runResMode() {
-  t = rtc.getTime();
-  Serial.println(rtc.getTimeStr());
-//  Serial.println(rtc.getDateStr());
-  if (t.hour != reservedTime) {
+
+  if (t.hour != reservedHour && t.min != reservedMinute) {
     resModeRefillCount = 0;
     standBy();
   } else {
-    if(resModeRefillCount > 0) standBy();
-    else {
-      lcd.clear();
-      for (int i = 0; i<3; i++) {
-        lcd.setCursor(0,0);
-        lcd.print("Reserved time   ");
-        lcd.setCursor(0,1);
-        lcd.print("Auto Mode Init  ");
-        delay(1000);
-        lcd.clear();
-        delay(300);
-      }
-      fillWaterTank();
-      resModeRefillCount++;
+    lcd.clear();
+    for (int i = 0; i<3; i++) {
+      lcd.setCursor(0,0);
+      lcd.print("Reserve time met");
+      lcd.setCursor(0,1);
+      lcd.print("Auto Mode Init  ");
+      delay(1000);
     }
+    fillWaterTank();
+    resModeRefillCount++;
   }
   delay(200);
 }
@@ -307,46 +381,70 @@ void standBy() {
 }
 
 //ISR functions 
-void leftBtn() {
+void ISR_leftBtn() {
   if(!interruptStandBy) {
-    interruptStandBy =  0;
     switch(stateStatus) {
-      case 0 :
+      case 0 : //in run state -> manual refill
         refillReq = 1;
         break;
-      case 1 :
-          if (setSelect<2) setSelect++;
-        else setSelect = 0;
+      case 1 : //set state -> choosing mode to select
+          if (modeSelect<2) modeSelect++;
+        else modeSelect = 0;
         break;
+      case 2: //res time set state -> choosing time to set
+        switch (resSetSelect) {
+          case 0 : // choosing hour
+            if(resHourSelect < 23) resHourSelect++;
+            else resHourSelect = 0;
+            break;
+          case 1 : // choosing minute
+            if(resMinuteSelect < 59) resMinuteSelect++;
+            else resMinuteSelect = 0;
+            break;
+        }
       default :
         break;
     }
   interruptStandBy = true;
   }
 }
-void rightBtn () {
+void ISR_rightBtn () {
   if(!interruptStandBy) {
     switch(stateStatus) {
-      case 0 : 
+      case 0 : //run State
         stateStatus = 1;
-        setSelect = modeStatus;
+        modeSelect = modeStatus;
         break;
-      case 1 :
-        switch(setSelect) {
-            case 0 :
+      case 1 : //set state
+        switch(modeSelect) {
+            case 0 : //select auto mode
                 modeStatus = 0;
                 stateStatus = 0;
                 break;
-            case 1 :
+            case 1 : //select res mode and enter res time set state
                 modeStatus = 1;
-                stateStatus = 0;
+                stateStatus = 2;
                 break;
-            case 2 : 
+            case 2 : //select manual mode
                 modeStatus = 2;
                 stateStatus = 0;
                 break;
             default :
               break;
+        }
+		break;
+      case 2 : //res time set state
+        switch (resSetSelect) {
+          case 0 : //go to minute set
+            reservedHour = resHourSelect;
+            resSetSelect = 1;
+            break;
+          case 1 : // time set complete enter res mode
+            reservedMinute = resMinuteSelect;
+			resSetSelect = 2;
+            break;
+          default : 
+            break;
         }
       break;
     }
